@@ -1,0 +1,1 @@
+pub const CHIP8_LOGO: &str = "roms/1-chip8-logo.ch8";
