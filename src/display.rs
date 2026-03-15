@@ -1,7 +1,27 @@
-use minifb::{Scale, Window, WindowOptions};
+use minifb::{Scale, Window, WindowOptions, Key};
 
 const WHITE_COLOR: u32 = 0xFFFFFF;
 const BLACK_COLOR: u32 = 0x000000;
+
+const KEY_MAP: [Key; 16] = [
+    Key::X,    // 0
+    Key::Key1, // 1
+    Key::Key2, // 2
+    Key::Key3, // 3
+    Key::Q,    // 4
+    Key::W,    // 5
+    Key::E,    // 6
+    Key::A,    // 7
+    Key::S,    // 8
+    Key::D,    // 9
+    Key::Z,    // A
+    Key::C,    // B
+    Key::Key4, // C
+    Key::R,    // D
+    Key::F,    // E
+    Key::V,    // F
+];
+
 pub struct Display {
     width: usize,
     height: usize,
@@ -62,5 +82,9 @@ impl Display {
 
         // return is there a collision or not
         return existing_pixel == 1 && pixel == 1;
+    }
+
+    pub fn is_key_down(&self, chip_8_key: u8) -> bool {
+        self.window.is_key_down(KEY_MAP[chip_8_key as usize])
     }
 }

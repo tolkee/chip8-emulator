@@ -1,8 +1,7 @@
 use std::fs;
-use std::io;
-use minifb::{Scale};
 use rand::Rng;
 
+use crate::errors::EmulatorError;
 use crate::display::Display;
 
 // Here some info about memory allocation from chip8 spec :
@@ -26,15 +25,15 @@ pub struct Emulator {
 }
 
 impl Emulator {
-    pub fn new() -> Self {
+    pub fn new(display: Display) -> Self {
         Emulator {
             memory: [0; MAX_MEMORY],
             pc: ROM_START,
             i: 0,
             v: [0; 16],
-            display: Display::new("chip8", 64, 32, Scale::X16),
+            sp: 0,
             stack: [0; 16],
-            sp: 0
+            display,
         }
     }
 
@@ -42,179 +41,75 @@ impl Emulator {
         println!("[emulator] Running programm...");
 
         loop {
-            let opcode: u16 = (self.memory[self.pc as usize] as u16) << 8 | (self.memory[self.pc as usize + 1] as u16);
-            let nibble_1 = (opcode & 0xF000) >> 12;
-            let x = (opcode & 0x0F00) >> 8;
-            let y = (opcode & 0x00F0) >> 4;
-            let n = opcode & 0x000F;
-            let nnn = opcode & 0x0FFF;
-            let kk = (opcode & 0x00FF) as u8;  
-
-            match nibble_1 {
-                0x0 => {
-                    if opcode == 0x00E0 {
-                        self.display.clear();
-                        self.pc += 2;
-                    } else if opcode == 0x00EE {
-                        self.pc = self.stack[self.sp as usize];
-                        self.sp -= 1;
-                    }
-                },
-                0x1 => self.pc = nnn,
-                0x2 => {
-                    self.sp += 1;
-                    self.stack[self.sp as usize] = self.pc + 2;
-                    self.pc = nnn;
-                },
-                0x3 => {
-                    if self.v[x as usize] == kk {
-                        self.pc += 4;
-                    } else {
-                        self.pc += 2;
-                    }
-                },
-                0x4 => {
-                    if self.v[x as usize] != kk {
-                        self.pc += 4;
-                    } else {
-                        self.pc += 2;
-                    }
-                },
-                0x5 => {
-                    if n == 0 && self.v[x as usize] == self.v[y as usize] {
-                        self.pc += 4;
-                    } else {
-                        self.pc += 2;
-                    }
-                },
-                0x6 => {
-                    self.v[x as usize] = kk;
-                    self.pc += 2;
-                },
-                0x7 => {
-                    self.v[x as usize] = self.v[x as usize].wrapping_add(kk);
-                    self.pc += 2;
-                },
-                0x8 => {
-                    match n {
-                        0x0 => self.v[x as usize] = self.v[y as usize],
-                        0x1 => self.v[x as usize] |= self.v[y as usize],
-                        0x2 => self.v[x as usize] &= self.v[y as usize],
-                        0x3 => self.v[x as usize] ^= self.v[y as usize],
-                        0x4 => {
-                            let result = self.v[x as usize] as u16 + self.v[y as usize] as u16;
-                            let carry = if result > 0xFF {1} else {0}; 
-                            self.v[x as usize] = result as u8;
-                            self.v[0xF] = carry;           
-
-                        },
-                        0x5 => {
-                            let not_borrow = if self.v[x as usize] >= self.v[y as usize] {1} else {0};
-                            self.v[x as usize] = self.v[x as usize].wrapping_sub(self.v[y as usize]);
-                            self.v[0xF] = not_borrow;   
-                        },
-                        0x6 => {
-                            let lsb = self.v[x as usize] & 1;
-                            self.v[x as usize] >>= 1;
-                            self.v[0xF] = lsb;
-
-                        },
-                        0x7 => {
-                            let not_borrow = if self.v[y as usize] >= self.v[x as usize] {1} else {0}; 
-                            self.v[x as usize] = self.v[y as usize].wrapping_sub(self.v[x as usize]);
-                            self.v[0xF] = not_borrow;   
-                        },
-                        0xE => {
-                            let msb = (self.v[x as usize] & 0x80) >> 7;
-                            self.v[x as usize] <<= 1;
-                            self.v[0xF] = msb;
-                        },
-                        _ => return Err(EmulatorError::InvalidOpCode(opcode))
-                    };
-
-                    self.pc += 2;
-                },
-                0x9 => {
-                    if n == 0 && self.v[x as usize] != self.v[y as usize] {
-                        self.pc += 4;
-                    } else {
-                        self.pc += 2;
-                    }
-                },
-                0xA => {
-                    self.i = nnn;
-                    self.pc += 2;
-                },
-                0xB => {
-                    self.pc = nnn.wrapping_add(self.v[0] as u16);
-                },
-                0xC => {
-                    let random_byte: u8 = rand::thread_rng().r#gen();
-
-                    self.v[x as usize] = random_byte & kk;
-
-                    self.pc += 2;
-                },
-                0xD => {
-                    let bytes_to_draw: &[u8] = &self.memory[(self.i as usize)..((self.i as usize) + n as usize)];
-                    let vx: u8 = self.v[x as usize];
-                    let vy = self.v[y as usize];
-
-                    let is_collisions = self.display.draw(bytes_to_draw, vx, vy);
-                    self.v[0xF] = if is_collisions {1} else {0};
-
-                    self.pc += 2;
-                },
-                0xE => {
-                    match kk {
-                        0x9E => return Err(EmulatorError::NotImplementedOpCode(opcode)),
-                        0xA1 => return Err(EmulatorError::NotImplementedOpCode(opcode)),
-                        _ => return Err(EmulatorError::InvalidOpCode(opcode))
-                    }
-                },
-                0xF => {
-                    match kk {
-                        0x07 => return Err(EmulatorError::NotImplementedOpCode(opcode)),
-                        0x0A => return Err(EmulatorError::NotImplementedOpCode(opcode)),
-                        0x15 => return Err(EmulatorError::NotImplementedOpCode(opcode)),
-                        0x18 => return Err(EmulatorError::NotImplementedOpCode(opcode)),
-                        0x1E => {
-                            self.i = self.i.wrapping_add(self.v[x as usize] as u16); 
-                        },
-                        0x29 => return Err(EmulatorError::NotImplementedOpCode(opcode)),
-                        0x33 => {
-                            let hundreds = self.v[x as usize] / 100;
-                            let tens = (self.v[x as usize]/ 10) % 10;
-                            let units = self.v[x as usize] % 10;
-
-                            self.memory[self.i as usize] = hundreds;
-                            self.memory[(self.i + 1) as usize] = tens;
-                            self.memory[(self.i + 2) as usize] = units;
-                        },
-                        0x55 => {
-                            for index in 0..=x {
-                                self.memory[(self.i+index) as usize] = self.v[index as usize]
-                            }
-                        },
-                        0x65 => {
-                            for index in 0..=x {
-                                self.v[index as usize] = self.memory[(self.i + index)  as usize]
-                            }
-                        },
-                        _ => return Err(EmulatorError::InvalidOpCode(opcode))
-                    };
-
-                    self.pc += 2;
-                },
-                _ => return Err(EmulatorError::InvalidOpCode(opcode))
-            }
-
+            self.cpu_cycle()?;
             self.display.update();
 
             if self.pc >= (ROM_END - 1) {
                 return Ok(());
             }
         }
+    }
+
+    fn cpu_cycle(&mut self) -> Result<(), EmulatorError> {
+        let opcode: u16 = (self.memory[self.pc as usize] as u16) << 8 | (self.memory[self.pc as usize + 1] as u16);
+        let nibble_1 = (opcode & 0xF000) >> 12;
+        let x = (opcode & 0x0F00) >> 8;
+        let y = (opcode & 0x00F0) >> 4;
+        let n = opcode & 0x000F;
+        let nnn = opcode & 0x0FFF;
+        let kk = (opcode & 0x00FF) as u8;
+
+        match nibble_1 {
+            0x0 => match opcode {
+                0x00E0 => self.op_00e0(),
+                0x00EE => self.op_00ee(),
+                _ => return Err(EmulatorError::InvalidOpCode(opcode)),
+            }
+            0x1 => self.op_1nnn(nnn),
+            0x2 => self.op_2nnn(nnn),
+            0x3 => self.op_3xkk(x, kk),
+            0x4 => self.op_4xkk(x, kk),
+            0x5 => self.op_5xy0(x, y, n),
+            0x6 => self.op_6xkk(x, kk),
+            0x7 => self.op_7xkk(x, kk),
+            0x8 => match n {
+                0x0 => self.op_8xy0(x, y),
+                0x1 => self.op_8xy1(x, y),
+                0x2 => self.op_8xy2(x, y),
+                0x3 => self.op_8xy3(x, y),
+                0x4 => self.op_8xy4(x, y),
+                0x5 => self.op_8xy5(x, y),
+                0x6 => self.op_8xy6(x),
+                0x7 => self.op_8xy7(x, y),
+                0xE => self.op_8xy_e(x),
+                _ => return Err(EmulatorError::InvalidOpCode(opcode)),
+            },
+            0x9 => self.op_9xy0(x, y, n),
+            0xA => self.op_annn(nnn),
+            0xB => self.op_bnnn(nnn),
+            0xC => self.op_cxkk(x, kk),
+            0xD => self.op_dxyn(x, y, n),
+            0xE => match kk {
+                0x9E => self.op_ex9e(x),
+                0xA1 => self.op_exa1(x),
+                _ => return Err(EmulatorError::InvalidOpCode(opcode)),
+            },
+            0xF => match kk {
+                0x07 => return Err(EmulatorError::NotImplementedOpCode(opcode)),
+                0x0A => return Err(EmulatorError::NotImplementedOpCode(opcode)),
+                0x15 => return Err(EmulatorError::NotImplementedOpCode(opcode)),
+                0x18 => return Err(EmulatorError::NotImplementedOpCode(opcode)),
+                0x1E => self.op_fx1e(x),
+                0x29 => return Err(EmulatorError::NotImplementedOpCode(opcode)),
+                0x33 => self.op_fx33(x),
+                0x55 => self.op_fx55(x),
+                0x65 => self.op_fx65(x),
+                _ => return Err(EmulatorError::InvalidOpCode(opcode)),
+            },
+            _ => return Err(EmulatorError::InvalidOpCode(opcode)),
+        }
+
+        Ok(())
     }
 
     pub fn load_rom_file(&mut self, path: &str) -> Result<(), EmulatorError> {
@@ -236,11 +131,191 @@ impl Emulator {
 
         Ok(())
     }
-}
 
-pub enum EmulatorError {
-    RomTooBig(usize),
-    RomReadError(io::Error),
-    InvalidOpCode(u16),
-    NotImplementedOpCode(u16),
+    fn op_00e0(&mut self) {
+        self.display.clear();
+        self.pc += 2;
+    }
+
+    fn op_00ee(&mut self) {
+        self.pc = self.stack[self.sp as usize];
+        self.sp -= 1;
+    }
+
+    fn op_1nnn(&mut self, nnn: u16) {
+        self.pc = nnn;
+    }
+
+    fn op_2nnn(&mut self, nnn: u16) {
+        self.sp += 1;
+        self.stack[self.sp as usize] = self.pc + 2;
+        self.pc = nnn;
+    }
+
+    fn op_3xkk(&mut self, x: u16, kk: u8) {
+        if self.v[x as usize] == kk {
+            self.pc += 4;
+        } else {
+            self.pc += 2;
+        }
+    }
+
+    fn op_4xkk(&mut self, x: u16, kk: u8) {
+        if self.v[x as usize] != kk {
+            self.pc += 4;
+        } else {
+            self.pc += 2;
+        }
+    }
+
+    fn op_5xy0(&mut self, x: u16, y: u16, n: u16) {
+        if n == 0 && self.v[x as usize] == self.v[y as usize] {
+            self.pc += 4;
+        } else {
+            self.pc += 2;
+        }
+    }
+
+    fn op_6xkk(&mut self, x: u16, kk: u8) {
+        self.v[x as usize] = kk;
+        self.pc += 2;
+    }
+
+    fn op_7xkk(&mut self, x: u16, kk: u8) {
+        self.v[x as usize] = self.v[x as usize].wrapping_add(kk);
+        self.pc += 2;
+    }
+
+    fn op_8xy0(&mut self, x: u16, y: u16) {
+        self.v[x as usize] = self.v[y as usize];
+        self.pc += 2;
+    }
+
+    fn op_8xy1(&mut self, x: u16, y: u16) {
+        self.v[x as usize] |= self.v[y as usize];
+        self.pc += 2;
+    }
+
+    fn op_8xy2(&mut self, x: u16, y: u16) {
+        self.v[x as usize] &= self.v[y as usize];
+        self.pc += 2;
+    }
+
+    fn op_8xy3(&mut self, x: u16, y: u16) {
+        self.v[x as usize] ^= self.v[y as usize];
+        self.pc += 2;
+    }
+
+    fn op_8xy4(&mut self, x: u16, y: u16) {
+        let result = self.v[x as usize] as u16 + self.v[y as usize] as u16;
+        let carry = if result > 0xFF { 1 } else { 0 };
+        self.v[x as usize] = result as u8;
+        self.v[0xF] = carry;
+        self.pc += 2;
+    }
+
+    fn op_8xy5(&mut self, x: u16, y: u16) {
+        let not_borrow = if self.v[x as usize] >= self.v[y as usize] { 1 } else { 0 };
+        self.v[x as usize] = self.v[x as usize].wrapping_sub(self.v[y as usize]);
+        self.v[0xF] = not_borrow;
+        self.pc += 2;
+    }
+
+    fn op_8xy6(&mut self, x: u16) {
+        let lsb = self.v[x as usize] & 1;
+        self.v[x as usize] >>= 1;
+        self.v[0xF] = lsb;
+        self.pc += 2;
+    }
+
+    fn op_8xy7(&mut self, x: u16, y: u16) {
+        let not_borrow = if self.v[y as usize] >= self.v[x as usize] { 1 } else { 0 };
+        self.v[x as usize] = self.v[y as usize].wrapping_sub(self.v[x as usize]);
+        self.v[0xF] = not_borrow;
+        self.pc += 2;
+    }
+
+    fn op_8xy_e(&mut self, x: u16) {
+        let msb = (self.v[x as usize] & 0x80) >> 7;
+        self.v[x as usize] <<= 1;
+        self.v[0xF] = msb;
+        self.pc += 2;
+    }
+
+    fn op_9xy0(&mut self, x: u16, y: u16, n: u16) {
+        if n == 0 && self.v[x as usize] != self.v[y as usize] {
+            self.pc += 4;
+        } else {
+            self.pc += 2;
+        }
+    }
+
+    fn op_annn(&mut self, nnn: u16) {
+        self.i = nnn;
+        self.pc += 2;
+    }
+
+    fn op_bnnn(&mut self, nnn: u16) {
+        self.pc = nnn.wrapping_add(self.v[0] as u16);
+    }
+
+    fn op_cxkk(&mut self, x: u16, kk: u8) {
+        let random_byte: u8 = rand::thread_rng().r#gen();
+        self.v[x as usize] = random_byte & kk;
+        self.pc += 2;
+    }
+
+    fn op_dxyn(&mut self, x: u16, y: u16, n: u16) {
+        let bytes_to_draw: &[u8] = &self.memory[(self.i as usize)..((self.i as usize) + n as usize)];
+        let vx: u8 = self.v[x as usize];
+        let vy = self.v[y as usize];
+        let is_collisions = self.display.draw(bytes_to_draw, vx, vy);
+        self.v[0xF] = if is_collisions { 1 } else { 0 };
+        self.pc += 2;
+    }
+
+    fn op_ex9e(&mut self, x: u16) {
+        if self.display.is_key_down(self.v[x as usize]) {
+            self.pc += 4;
+        } else {
+            self.pc += 2;
+        }
+    }
+
+    fn op_exa1(&mut self, x: u16) {
+        if !self.display.is_key_down(self.v[x as usize]) {
+            self.pc += 4;
+        } else {
+            self.pc += 2;
+        }
+    }
+
+    fn op_fx1e(&mut self, x: u16) {
+        self.i = self.i.wrapping_add(self.v[x as usize] as u16);
+        self.pc += 2;
+    }
+
+    fn op_fx33(&mut self, x: u16) {
+        let hundreds = self.v[x as usize] / 100;
+        let tens = (self.v[x as usize] / 10) % 10;
+        let units = self.v[x as usize] % 10;
+        self.memory[self.i as usize] = hundreds;
+        self.memory[(self.i + 1) as usize] = tens;
+        self.memory[(self.i + 2) as usize] = units;
+        self.pc += 2;
+    }
+
+    fn op_fx55(&mut self, x: u16) {
+        for index in 0..=x {
+            self.memory[(self.i + index) as usize] = self.v[index as usize];
+        }
+        self.pc += 2;
+    }
+
+    fn op_fx65(&mut self, x: u16) {
+        for index in 0..=x {
+            self.v[index as usize] = self.memory[(self.i + index) as usize];
+        }
+        self.pc += 2;
+    }
 }

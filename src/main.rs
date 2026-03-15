@@ -1,12 +1,19 @@
 mod emulator;
 mod roms;
 mod display;
+mod errors;
 
 use emulator::Emulator;
-use emulator::EmulatorError;
+use errors::EmulatorError;
+use minifb::{Scale};
+
+use crate::display::Display;
+
 
 fn main() {
-    let mut emulator = Emulator::new();
+    let display = Display::new("chip8", 64, 32, Scale::X16);
+    let mut emulator = Emulator::new(display);
+
     let rom_file_path: &str = roms::FLAGS; 
 
 
@@ -28,6 +35,11 @@ fn main() {
             println!("[emulator] Error: Invalid OPcode {}", opcode);
             std::process::exit(1);
         },
+        Err(EmulatorError::NotImplementedOpCode(opcode)) => {
+            println!("[emulator] Error: Not implemented OPcode {}", opcode);
+            std::process::exit(1);
+        },
+
         _ => ()
     }
 }   
