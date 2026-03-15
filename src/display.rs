@@ -24,25 +24,21 @@ impl Display {
         }
     }
 
-    pub fn is_open(&self) -> bool {
-        self.window.is_open()
-    }
-
     pub fn clear(&mut self) {
-        self.buffer = vec![0; self.width * self.height];
-        self.rendering_buffer = vec![0xFFFFFF; self.width * self.height];
+        self.buffer.fill(0);
+        self.rendering_buffer.fill(0xFFFFFF);
     }
 
     pub fn update(&mut self) {
         self.window.update_with_buffer(&self.rendering_buffer, self.width, self.height).unwrap();
     }
 
-    pub fn draw(&mut self, bytes_to_draw: Vec<u8>, x: u8, y: u8) -> bool {
+    pub fn draw(&mut self, bytes_to_draw: &[u8], x: u8, y: u8) -> bool {
         let mut is_collisions = false;
 
         for (row, bytes) in bytes_to_draw.iter().enumerate() {
             for bit in 0..8 {
-                let offset = (y as usize + row) * self.width + (x as usize+ bit);
+                let offset: usize = (y as usize + row) * self.width + (x as usize+ bit);
                 let pixel: u8 = (bytes >> (7 - bit)) & 1;
 
                 is_collisions = is_collisions || self.draw_pixel(pixel, offset)
@@ -53,11 +49,16 @@ impl Display {
     }
 
     fn draw_pixel(&mut self, pixel: u8, offset: usize) -> bool {
-        let existing_pixel = self.buffer[offset];
+        let buffer_len = self.width * self.height;
+
+        // We are wrapping the offset given so that sprite at the edge are wrapped around
+        let wrapped_offset = offset % buffer_len;
+
+        let existing_pixel = self.buffer[wrapped_offset];
         let new_pixel = existing_pixel ^ pixel;
 
-        self.buffer[offset] = new_pixel;
-        self.rendering_buffer[offset] = if new_pixel == 1 {BLACK_COLOR} else {WHITE_COLOR};
+        self.buffer[wrapped_offset] = new_pixel;
+        self.rendering_buffer[wrapped_offset] = if new_pixel == 1 {BLACK_COLOR} else {WHITE_COLOR};
 
         // return is there a collision or not
         return existing_pixel == 1 && pixel == 1;

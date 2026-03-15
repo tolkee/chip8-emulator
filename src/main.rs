@@ -7,7 +7,7 @@ use emulator::EmulatorError;
 
 fn main() {
     let mut emulator = Emulator::new();
-    let rom_file_path: &str = roms::CHIP8_LOGO; 
+    let rom_file_path: &str = roms::FLAGS; 
 
 
     match emulator.load_rom_file(rom_file_path) {
@@ -20,7 +20,14 @@ fn main() {
             println!("[emulator] Error: {}", io_error);
             std::process::exit(1);
         },
+        _ => ()
     }
 
-    emulator.run()
+    match emulator.run() {
+        Err(EmulatorError::InvalidOpCode(opcode)) => {
+            println!("[emulator] Error: Invalid OPcode {}", opcode);
+            std::process::exit(1);
+        },
+        _ => ()
+    }
 }   
